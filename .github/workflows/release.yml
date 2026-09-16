@@ -1,10 +1,15 @@
 # Release: cut a version tag, get a GitHub Release with an installable tarball.
 #
-# Triggered by a version tag (`v2.0.0`). Two guards run before anything is built:
-# the tag must equal `version` in package.json, and CHANGELOG.md must carry a
-# `## v. <version>` section — that section becomes the Release body, so the
-# changelog stays the single source of release notes and a release cannot be cut
-# without one.
+# Triggered by a version tag (`v2.0.0`) or manually from the Actions tab. Two
+# guards run before anything is built: on a tag push the tag must equal `version`
+# in package.json, and in both cases CHANGELOG.md must carry a `## v. <version>`
+# section — that section becomes the Release body, so the changelog stays the
+# single source of release notes and a release cannot be cut without one.
+#
+# A tag push that carries the workflow file itself can be missed: GitHub evaluates
+# the tag trigger against the workflows already present on the default branch. When
+# that happens, re-push the tag (delete it on the remote and push it again) or use
+# the manual `workflow_dispatch` run, which releases the package.json version.
 #
 # Why no npm publish: the npm name `dsh-tidewatch` belongs to the original author
 # (1.0.6, 2026-08-22), so publishing would force a rename or a scope and change the
@@ -31,6 +36,11 @@ on:
   push:
     tags:
       - 'v*'
+  # Manual recovery path: releases the version currently in package.json from the
+  # default branch. Use it when a tag push went up together with the workflow file
+  # (GitHub evaluates the tag trigger against the workflows already on the default
+  # branch, so the very first tag can be missed) or to re-run a failed release.
+  workflow_dispatch:
 
 permissions:
   contents: write # create the GitHub Release
@@ -52,16 +62,21 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Verify the tag matches package.json
+      - name: Resolve the version
         run: |
-          tag="${GITHUB_REF_NAME#v}"
           pkg="$(node -p "require('./package.json').version")"
-          if [ "$tag" != "$pkg" ]; then
-            echo "::error::tag v${tag} does not match package.json version ${pkg}"
-            exit 1
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "Manual run: releasing v${pkg} from package.json"
+          else
+            tag="${GITHUB_REF_NAME#v}"
+            if [ "$tag" != "$pkg" ]; then
+              echo "::error::tag v${tag} does not match package.json version ${pkg}"
+              exit 1
+            fi
+            echo "Tag v${tag} matches package.json"
           fi
           echo "VERSION=${pkg}" >> "$GITHUB_ENV"
-          echo "Releasing v${pkg}"
+          echo "TAG=v${pkg}" >> "$GITHUB_ENV"
 
       - name: Extract release notes from CHANGELOG.md
         run: |
@@ -88,7 +103,8 @@ jobs:
       - name: Create the GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          name: v${{ env.VERSION }}
+          tag_name: ${{ env.TAG }}
+          name: ${{ env.TAG }}
           body_path: release-notes.md
           files: '*.tgz'
           fail_on_unmatched_files: true
