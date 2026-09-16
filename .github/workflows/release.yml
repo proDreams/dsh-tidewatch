@@ -1,0 +1,96 @@
+# Release: cut a version tag, get a GitHub Release with an installable tarball.
+#
+# Triggered by a version tag (`v2.0.0`). Two guards run before anything is built:
+# the tag must equal `version` in package.json, and CHANGELOG.md must carry a
+# `## v. <version>` section — that section becomes the Release body, so the
+# changelog stays the single source of release notes and a release cannot be cut
+# without one.
+#
+# Why no npm publish: the npm name `dsh-tidewatch` belongs to the original author
+# (1.0.6, 2026-08-22), so publishing would force a rename or a scope and change the
+# string users type for zero functional gain — DeepSeek Harness installs any pnpm
+# spec, including a git tag or the tarball attached below. Discovery in this
+# ecosystem is the GitHub `dsh-plugin` topic plus the `dshhub` block in
+# package.json, not an npm listing.
+#
+# If that ever changes, adding npm back is a small, self-contained diff:
+#   1. pick a free name or scope (registry.npmjs.org/<name> must be 404) and set
+#      package.json `name`; the DSH install key follows `name`, so update the
+#      `name` row in cordis.patch.yml to match;
+#   2. add "images" back to package.json `files` so the npm README renders the
+#      screenshots, and add a `prepublishOnly` script for the same guards;
+#   3. set `id-token: write` and `contents: read` here, and either configure a
+#      Trusted Publisher on npmjs.com (repository proDreams/dsh-tidewatch,
+#      workflow release.yml) or provide an NPM_TOKEN secret for the first publish;
+#   4. add a publish step: `npm install --global npm@^11.5.1` (Node 22 ships npm 10,
+#      trusted publishing needs >= 11.5.1) then `npm publish --provenance --access public`.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # create the GitHub Release
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  release:
+    name: Build the tarball and create the GitHub Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verify the tag matches package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v${tag} does not match package.json version ${pkg}"
+            exit 1
+          fi
+          echo "VERSION=${pkg}" >> "$GITHUB_ENV"
+          echo "Releasing v${pkg}"
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          awk -v heading="## v. ${VERSION}" '
+            $0 == heading { found = 1; next }
+            found && /^## / { exit }
+            found { if (!started && $0 == "") next; started = 1; print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::CHANGELOG.md has no '## v. ${VERSION}' section"
+            exit 1
+          fi
+          echo '--- release notes ---'
+          cat release-notes.md
+
+      - name: Syntax check and self-test
+        run: |
+          npm run check
+          npm test
+
+      - name: Build the installable tarball
+        run: npm pack --pack-destination .
+
+      - name: Create the GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: v${{ env.VERSION }}
+          body_path: release-notes.md
+          files: '*.tgz'
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

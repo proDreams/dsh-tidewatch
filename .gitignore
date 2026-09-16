@@ -5,6 +5,10 @@ node_modules/
 *.tgz
 *.zip
 
+# IDE
+.idea/
+.vscode/
+
 # OS noise
 .DS_Store
 Thumbs.db
