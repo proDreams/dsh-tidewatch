@@ -1,126 +1,295 @@
-# dsh-tidewatch
+# Napkin Tools: DSH Tidewatch
 
-**DeepSeek 峰谷时刻悬浮徽章**：一张悬浮在输入框旁的潮汐卡，告诉你此刻是峰期还是谷期、距下一阶段还有多久、本次会话花了多少钱。
+![GitHub License](https://img.shields.io/github/license/proDreams/dsh-tidewatch)
+![GitHub Release](https://img.shields.io/github/v/release/proDreams/dsh-tidewatch)
+![GitHub Last Commit](https://img.shields.io/github/last-commit/proDreams/dsh-tidewatch)
+![GitHub Repo Stars](https://img.shields.io/github/stars/proDreams/dsh-tidewatch)
+[![Код на салфетке](https://img.shields.io/badge/Telegram-Код_на_салфетке-blue)](https://t.me/napkincode)
+[![Заметки на салфетке](https://img.shields.io/badge/Telegram-Заметки_на_салфетке-blue)](https://t.me/writeanynotes)
 
-- 状态点：**峰期橙红 / 谷期蓝绿**，一眼可辨
-- 折叠态：`● 峰期 距谷期 03:33 · ¥0.12`
-- 展开态（点击展开）：官方峰谷时段表（北京时间）、当前档位价格、本次会话 Token 明细、汇率设置
-- 计费：官方峰谷两档价格（美元口径；含 基础价 / 首版峰谷价 / V4.1 Flash 新价 三段历史档），按每次调用**实际发生时刻**的档位计价，缓存命中/未命中分开
-- 币种：默认人民币显示（固定汇率 6.67，与官方人民币标价一致），展开面板可一键切换美元（4 位小数）
-- 跟随 GUI 亮/暗主题（`--dsw-*` 变量）
-- 前端优先采用 DSH 官方 UI 原语（shell 共享模块表中的 `@deepseek-ai/dsh-client-ui-primitives`）：状态点 `StateDot`、标签 `Tag`、悬浮提示 `Tooltip`、外点关闭 `useDismissOnOutsidePointer`，观感与官方控件一致；老版 shell 的模块表若没有该包，自动降级到内置实现，功能不受影响
+## [Русская версия](./README-RU.md)
 
-## 峰谷时段（官方依据）
+<p align="center">
+  <img src="images/card-dark.png" width="400" alt="DSH Tidewatch">
+</p>
 
-DeepSeek 官方自 2026-08-17 起实施峰谷分时定价：
+A floating peak/off-peak **tide gauge** for the DeepSeek Harness web UI. It docks beside the composer and answers three
+questions at a glance: which pricing phase is active right now, how long is left in it, and how much this session has
+cost.
 
-| 时段（UTC） | 北京时间 | 档位 |
-|---|---|---|
-| 01:00 – 04:00 | 09:00 – 12:00 | 峰 |
-| 04:00 – 06:00 | 12:00 – 14:00 | 谷 |
-| 06:00 – 10:00 | 14:00 – 18:00 | 峰 |
-| 10:00 – 次日 01:00 | 18:00 – 次日 09:00 | 谷 |
+The card follows the DeepSeek Harness interface language (English, Chinese, Russian), renders the official
+peak/off-peak windows in **your own time zone**, and formats money, tokens and clock times with `Intl` for the active
+locale.
 
-谷期价格为峰期的一半。徽章按 UTC 窗口判定当前档位（官方口径），时段表展示按北京时间。
+> This is a fork of [dsh-tidewatch](https://github.com/KhalilYamber/dsh-tidewatch) by KhalilYamber (MIT), reworked for
+> international use: a real i18n layer instead of hard-coded Chinese copy, a redesigned card, and a local-time window
+> table. The billing math and the session-projection structure come from the original project.
 
-**周末规则（2026-08-23 起）**：周六/周日（UTC 自然日）全天按谷期计价，无峰谷切换；下一阶段切换点为下周一首次进入峰时。
+## Table of contents
 
-## 计费口径
+- [Features](#features)
+- [Requirements](#requirements)
+- [Install](#install)
+  - [Upgrade and uninstall](#upgrade-and-uninstall)
+  - [Upgrading from the original 1.x](#upgrading-from-the-original-1x)
+- [Usage](#usage)
+- [Peak windows](#peak-windows)
+- [Billing model](#billing-model)
+- [Interface language](#interface-language)
+- [Themes and primitives](#themes-and-primitives)
+- [Project layout](#project-layout)
+- [Data flow](#data-flow)
+- [Development and verification](#development-and-verification)
+- [Known limitations](#known-limitations)
+- [Credits](#credits)
+- [Author](#author)
+- [Support](#support)
+- [License](#license)
 
-- 价格单位：美元 / 1M tokens（官方定价页口径），成本 = 输入未命中 × cacheMiss + 输出 × output + (缓存读 + 缓存写) × cacheHit；其中「输出」已含推理 token
-- **三段价格时代**，按调用发生时刻选档（历史正确性；档位顺序为 缓存命中 / 输入未命中 / 输出）：
+## Features
 
-  | 时代 | 时间范围（UTC） | deepseek-flash 档位 |
-  |---|---|---|
-  | 基础价 | 2026-08-16 16:00 之前 | 0.0028 / 0.14 / 0.28 |
-  | 首版峰谷价 | 2026-08-16 16:00 ~ 2026-09-10 04:00 | 峰 0.014 / 0.44 / 1.32，谷为峰的一半 |
-  | V4.1 Flash 新价 | 2026-09-10 04:00 起 | 峰 0.006 / 0.3 / 1.2，谷为峰的一半 |
+- **Phase at a glance** — an amber (peak) or green (off-peak) state dot with the current phase name and a live
+  countdown to the next switch.
+- **Tide line** — the header shows how much of the current phase has already elapsed.
+- **Window table in your time zone** — the official UTC windows mapped onto your own calendar day, with the current row
+  marked; the tier itself is always decided in UTC (the official definition).
+- **Weekend rule** — Saturday and Sunday (UTC calendar days) are off-peak all day, so the table collapses into a single
+  all-day row.
+- **Active tier rates** — cache-miss / cache-hit input prices and the output price per 1M tokens for the phase you are
+  in.
+- **Session tokens** — input, cache (read + write), output and reasoning, formatted per locale.
+- **Per-model cost** — expand the session-cost row to see every model's tokens and cost; the total equals the sum of the
+  parts.
+- **CNY or USD** — the default follows the interface language (Chinese → CNY, otherwise USD); switching is one click and
+  is remembered.
+- **Real i18n** — the card follows the DeepSeek Harness language, ships English, Chinese and Russian dictionaries, and
+  offers Russian as a selectable language.
+- **Shell integration** — reads the `--dsw-*` theme tokens (light and dark) and prefers the official `StateDot`, `Tag`,
+  `Tooltip` and `useDismissOnOutsidePointer` primitives, falling back to built-in implementations when a shell does not
+  expose them.
+- **Keyboard accessible** — the badge and the disclosure rows are real buttons with focus rings, `aria-expanded` /
+  `aria-pressed` states and a `progressbar` role on the tide line.
 
-- 每次调用的费用按**事件发生时刻**的档位计算，跨峰谷切换与跨调价均不漂移
-- 账本金额以美元存储，显示时按固定汇率 6.67 换算人民币（默认）或直接显示美元
+## Requirements
 
-## 安装
+- Node.js ≥ 20.
+- DeepSeek Harness with the `dsh plugin` command (a `web` profile).
+- Nothing else: the price tables are built in, and the plugin needs no API key or network access of its own.
 
-> 需求：Node.js ≥ 20 + 带 `dsh plugin` 命令的 DeepSeek Harness。
+## Install
+
+> The badge appears in the web UI, so install it into the `web` profile.
 
 ```sh
-# 方式一：从 GitHub 直装（推荐，跟随 main 最新）
-dsh plugin --profile web add github:KhalilYamber/dsh-tidewatch
+# Option 1: the latest main (recommended; follows the repository)
+dsh plugin --profile web add github:proDreams/dsh-tidewatch
 
-# 方式二：从 Release 的 tgz 安装（可固定版本、可离线）
-#   先到 Releases 页面下载 dsh-tidewatch-<版本>.tgz，然后：
-dsh plugin --profile web add ./dsh-tidewatch-1.1.1.tgz
+# Option 2: a pinned release tag (reproducible installs)
+dsh plugin --profile web add github:proDreams/dsh-tidewatch#v2.0.0
 
-# 本地目录（开发调试）
+# Option 3: the tarball attached to a GitHub Release (pinned and offline-friendly)
+dsh plugin --profile web add https://github.com/proDreams/dsh-tidewatch/releases/download/v2.0.0/dsh-tidewatch-2.0.0.tgz
+
+# Local directory (development)
 dsh plugin --profile web add link:/path/to/dsh-tidewatch
 ```
 
-> **npm 渠道已暂停**：npm 上仅有一个 2026-08-22 发布的旧版本（1.0.6），其价格与规则均已过时。请勿安装该版本，也不要据它判断当前计价——以上面两种方式为准。
+Restart `dsh web` after installing; the tide badge appears to the right of the composer.
 
-安装后重启 `dsh web` 生效，输入框右侧会出现潮汐徽章。
+> **The npm package `dsh-tidewatch` is not ours.** npm hosts only an old copy published by the original author (1.0.6,
+> 2026-08-22) whose prices and rules are outdated, and this fork deliberately stays off npm. Do not install it or judge
+> current billing from it — use one of the options above.
 
-### 升级与卸载
+### Upgrade and uninstall
 
 ```sh
-dsh plugin --profile web update dsh-tidewatch    # 或重新执行上面的 add
-dsh plugin --profile web list dsh-tidewatch      # 查看已安装版本
-dsh plugin --profile web remove dsh-tidewatch    # 卸载
+dsh plugin --profile web update dsh-tidewatch    # or re-run the add above
+dsh plugin --profile web list dsh-tidewatch      # installed version
+dsh plugin --profile web remove dsh-tidewatch    # uninstall
 ```
 
-> **v1.1.2 计价修正**：官方定价页脚注(2)与更新日志（2026-09-10）已声明 —— 2026-09-14 之后继续提供 V4 Pro API 服务、**计费方式保持不变**，如有变动另行通知。此前版本依据新闻发布页的旧口径，把 `deepseek-v4-pro` 从 2026-09-14 04:00 UTC 起路由到 Flash 价，会**低估** pro 调用（缓存未命中约 4.4 倍、缓存命中约 7.3 倍、输出约 3.3 倍）。本版把换价分界 `V4_PRO_RETIRE_BOUNDARY` 恢复为哨兵值，pro 恒按自身价目计费；路由分支保留，将来接到官方通知把日期填回即可。影响仅限 pro 调用，flash 与其它模型不受影响；本次不改 stateVersion，历史会话无需重放。
->
-> **v1.1.1 升级提示**：该版本把计价口径改为「按调用时刻在三段价格时代中选档」，并把 `costUsage` 投影版本提升到 stateVersion 4。升级后已持久化的历史会话会重放一次，2026-08-16 ~ 2026-09-10 窗口的费用会恢复为**当时**的首版峰谷价（此前按新价计算，偏低）。实时计费不受影响。
+See [CHANGELOG.md](CHANGELOG.md) for the release history.
 
-## 使用
+### Upgrading from the original 1.x
 
-- 徽章悬浮在输入框右侧、与输入框垂直居中对齐；窄窗口放不下时自动移到输入框上方，不遮挡输入框与官方统计栏
-- 点击徽章展开/收起详情面板：时段表、当前档位价格、Token 明细、币种切换（¥ / $）
-- 点击「本次会话费用」行可展开**分模型花费明细**（各模型的 token 与花费分别列出，合计 = 分模型之和）
-- 币种选择即时生效并记住；人民币 2 位小数，美元 4 位小数
+**2.0.0** adds the i18n layer, the local-time window table and the redesigned card. Billing itself is unchanged.
 
-## 文件结构
+Two earlier fixes are worth knowing about if you used the original plugin before 1.1.2:
+
+- **1.1.2 — V4 Pro billing.** The official pricing-page footnote (2) and the 2026-09-10 changelog state that V4 Pro API
+  service continues after 2026-09-14 **with its billing method unchanged** (further notice to follow if that changes).
+  The earlier build had followed a news-page reading that routed `deepseek-v4-pro` to the Flash price from 2026-09-14
+  04:00 UTC, which **understated** pro calls by roughly 4.4× (cache miss), 7.3× (cache hit) and 3.3× (output). The
+  repricing boundary `V4_PRO_RETIRE_BOUNDARY` is a sentinel again, so pro always bills on its own rates; the routing
+  branch is kept and only needs the date filled in when an official one appears.
+- **1.1.1 — three price eras.** Billing now picks the tier from the call's own timestamp, and the `costUsage` projection
+  moved to `stateVersion` 4. Persisted sessions replay once after the upgrade, so calls made between 2026-08-16 and
+  2026-09-10 are restored to the **first** peak schedule (they had been billed at the newer, lower rates). Live billing
+  was never affected.
+
+## Usage
+
+- The badge docks to the right of the composer, vertically centered with it. When the window is too narrow it moves
+  above the composer instead, and it never covers the input area or the built-in stats bar.
+- Click the badge to expand or collapse the panel: window table, active tier rates, token breakdown and the currency
+  switch.
+- Click the **Session cost** row to expand the per-model cost breakdown.
+- The currency switch applies immediately and persists; CNY shows 2 decimals, USD shows 4.
+- The expanded panel never exceeds the free space above the badge — its height budget is measured from the badge itself,
+  so it does not cover the composer on a small screen.
+
+## Peak windows
+
+DeepSeek introduced peak/off-peak time-of-day pricing on 2026-08-17:
+
+| Window (UTC) | Beijing time | Tier |
+|---|---|---|
+| 01:00 – 04:00 | 09:00 – 12:00 | peak |
+| 04:00 – 06:00 | 12:00 – 14:00 | off-peak |
+| 06:00 – 10:00 | 14:00 – 18:00 | peak |
+| 10:00 – next 01:00 | 18:00 – next 09:00 | off-peak |
+
+Off-peak prices are half of the peak prices. The card decides the tier from the **UTC** windows (the official
+definition) and renders the table in the viewer's own time zone.
+
+**Weekend rule (since 2026-08-23)**: Saturday and Sunday (UTC calendar days) bill at off-peak prices all day with no
+peak/off-peak switch; the next switch lands at the first peak window of the following Monday.
+
+## Billing model
+
+- Unit: USD per 1M tokens (the official pricing-page basis). Cost = input-miss × cacheMiss + output × output +
+  (cache-read + cache-write) × cacheHit; "output" already includes reasoning tokens.
+- **Three price eras**, selected by the call's own timestamp (historical correctness; tiers are listed as cache-hit /
+  cache-miss / output):
+
+  | Era | Range (UTC) | `deepseek-flash` tiers |
+  |---|---|---|
+  | Base price | before 2026-08-16 16:00 | 0.0028 / 0.14 / 0.28 |
+  | First peak schedule | 2026-08-16 16:00 – 2026-09-10 04:00 | peak 0.014 / 0.44 / 1.32, off-peak is half |
+  | V4.1 Flash repricing | from 2026-09-10 04:00 | peak 0.006 / 0.3 / 1.2, off-peak is half |
+
+- Every call is billed at the tier of its **event timestamp**, so costs do not drift across a phase switch or a
+  repricing.
+- The ledger stores USD. The panel displays CNY at the fixed 6.67 rate (which matches the official CNY price list) or
+  USD directly.
+
+## Interface language
+
+The card is a normal DeepSeek Harness citizen: it registers the `tidewatch` locale namespace and reads its copy through
+the framework translator, so switching the interface language in **Settings → Language** switches the card immediately.
+
+| Language | Status |
+|---|---|
+| English | shipped (`en`) — the fallback language of the lookup chain |
+| Chinese (Simplified) | shipped (`zh`) |
+| Russian | shipped (`ru`) and offered to the language catalog by the plugin |
+
+<p align="center">
+  <img src="images/card-ru.png" width="400" alt="Russian interface, off-peak phase">
+</p>
+
+- DeepSeek Harness ships only `zh` and `en`, so the plugin adds Russian to the language list itself. Other plugins fall
+  back to English for that language.
+- On a shell without a locale service the card falls back to the browser language instead of defaulting to one
+  hard-coded language.
+- Copy is never assembled from fragments: every string is a `{placeholder}` template owned by each language, and the
+  test suite fails if the dictionaries drift apart.
+
+## Themes and primitives
+
+The card follows the DeepSeek Harness theme through `--dsw-*` variables, and every plugin-local token keeps a
+scheme-aware fallback, so it stays correct on a host without the theme layer as well.
+
+- Light and dark are both supported; the phase accent (amber or green) is the only saturated colour.
+- Figures use the shell's mono stack with tabular numerals, so the panel reads like an instrument.
+- The front end prefers the official shared primitives — `StateDot`, `Tag`, `Tooltip` and
+  `useDismissOnOutsidePointer` — and degrades to built-in implementations when the shell's module table does not expose
+  them.
+
+<p align="center">
+  <img src="images/card-light.png" width="400" alt="Light theme">
+</p>
+
+## Project layout
 
 ```
 dsh-tidewatch
-├── package.json          # dsh.bundle.patch + dsh.client.platform 声明
-├── cordis.patch.yml      # 装配行
-├── scripts/build.sh      # 构建：语法检查 + zod junction
+├── package.json          # dsh.bundle.patch + dsh.client.platform manifest
+├── cordis.patch.yml      # bundle patch row
+├── scripts/build.sh      # build: syntax check + zod junction
 ├── lib/
-│   ├── pricing.js        # 纯函数：峰谷窗口、isPeakHour/peakPhaseAt、三段价格时代、costOf
-│   ├── index.js          # 宿主：costUsage 会话投影（按事件时刻计费）
-│   └── client.js         # 前端：悬浮徽章（__ModuleLoader__ bundle）
-├── docs/PORTING.md       # 移植到其他宿主的适配说明
-└── test/verify.mjs       # 纯模块自检（node test/verify.mjs，39 项）
+│   ├── pricing.js        # pure functions: windows, isPeakHour/peakPhaseAt, three price eras, costOf
+│   ├── index.js          # host: costUsage session projection (billed per event time)
+│   └── client.js         # browser: floating tide card + i18n dictionaries (__ModuleLoader__ bundle)
+├── docs/PORTING.md       # adaptation notes for other hosts
+└── test/verify.mjs       # pure-module self-test (node test/verify.mjs)
 ```
 
-## 数据流
+## Data flow
 
 ```
-模型调用 usage 块（assistant/chunk、assistant/message 事件）
-        │  lib/index.js：costUsage 会话投影（zod schema 校验）
+model-call usage blocks (assistant/chunk, assistant/message events)
+        │  lib/index.js: costUsage session projection (zod-schema validated)
         ▼
-  token 桶 + 美元成本（按事件时刻峰谷档位）
-        │  useProjection('costUsage')（浏览器端）
+  token buckets + USD cost (per-event-time peak/off-peak tier)
+        │  useProjection('costUsage') (browser)
         ▼
-  lib/client.js：悬浮徽章渲染（秒级倒计时 + 汇率换算显示）
+  lib/client.js: card rendering (per-second countdown, Intl formatting, FX conversion)
 ```
 
-## 开发与验证
+## Development and verification
 
 ```sh
-DSH_CHECKOUT=<harness 源码根目录> bash scripts/build.sh   # 语法检查 + zod junction
-node test/verify.mjs                                       # 峰谷数学与计费自检（39 项，含双份常量一致性）
+DSH_CHECKOUT=<harness source root> bash scripts/build.sh   # syntax check + zod junction
+node test/verify.mjs                                       # 70 checks: peak math, billing, i18n, time zones
 ```
 
-## 已知限制
+The suite materializes the real client bundle against a stub React and a fake plugin context, so it exercises the
+shipped dictionaries, the fallback chain, locale-aware formatting and the time-zone window table rather than a copy of
+them.
 
-- 价格表内置，含三段价格时代（基础价 / 首版峰谷价 / V4.1 Flash 新价）；V4-Pro 为官方 2026-08-17 价；官方定价页脚注(2)与更新日志（2026-09-10）声明 2026-09-14 之后继续提供 V4 Pro 服务、**计费方式保持不变**（如有变动另行通知），故 pro 恒按自身价目计费，换价分界 `V4_PRO_RETIRE_BOUNDARY` 保持哨兵值待官方通知。**官方调价后需手动同步** `lib/pricing.js`（计费）与 `lib/client.js` 的 `DISPLAY_PRICES`（展示）两处常量，并为旧价补一段历史档
-- 模型名映射：现役 `deepseek-flash`（V4.1 Flash）；别名 `deepseek-v4-flash`、`deepseek-v4-flash-vision-exp`、`deepseek-v4.1-flash` 均按现役 flash 价计费（见 `MODEL_ALIASES`）
-- 时段判定固定按 UTC（官方口径），时段表展示按北京时间（UTC+8）
-- 花费为美元账本 × 固定汇率 6.67 换算人民币（与官方人民币标价一致）；展开面板可切换美元显示
+## Known limitations
 
-## 借鉴与许可
+- **Prices are built in** and cover three eras (base price / first peak schedule / V4.1 Flash repricing); V4-Pro uses the
+  official 2026-08-17 rates. Per footnote (2) on the official pricing page and the 2026-09-10 changelog, V4 Pro keeps
+  being served after 2026-09-14 **with its billing method unchanged**, so pro always bills on its own rates and
+  `V4_PRO_RETIRE_BOUNDARY` stays a sentinel pending an official date. **When the official prices change, update both
+  `lib/pricing.js` (billing) and the `DISPLAY_PRICES` constant in `lib/client.js` (display) by hand, and keep the
+  superseded tiers as another historical era.**
+- **Model names**: `deepseek-flash` is current (V4.1 Flash); the aliases `deepseek-v4-flash`,
+  `deepseek-v4-flash-vision-exp` and `deepseek-v4.1-flash` are all billed at the current flash rate (see
+  `MODEL_ALIASES`).
+- **Tier judgement is fixed to UTC** (the official definition); the window table is display-only localization.
+- **The CNY display is a fixed-rate conversion** (6.67 USD → CNY, matching the official CNY prices), not a live rate.
 
-峰谷数学（isPeakHour / peakPhaseAt / tierFor / costOf）与会话投影结构借鉴自 [dsh-cost-meter](https://github.com/Han-1413141/dsh-cost-meter)（MIT License），按精简目标改写。
+## Credits
 
-[MIT](LICENSE) © 2026 KhalilYamber
+- Original project: [dsh-tidewatch](https://github.com/KhalilYamber/dsh-tidewatch) by **KhalilYamber** (MIT) — the
+  billing math, the price-era model and the session-projection structure.
+- Peak/off-peak math and the projection shape are adapted from
+  [dsh-cost-meter](https://github.com/Han-1413141/dsh-cost-meter) (MIT), rewritten for a minimal footprint.
+
+## Author
+
+Program author: Ivan Ashikhmin
+Telegram for contact: [https://t.me/proDreams](https://t.me/proDreams)
+
+The program was created as part of the "Code on a Napkin" project.
+
+- Website: [https://pressanybutton.ru/](https://pressanybutton.ru/)
+- Telegram channel: [https://t.me/napkincode](https://t.me/napkincode)
+
+## Support
+
+If you like this project and want to support its further development, consider donating:
+
+- [Support via YooMoney](https://yoomoney.ru/to/41001431694461)
+- [Support via Tribute in Telegram](https://t.me/tribute/app?startapp=dyds)
+- [Support via our Telegram bot](https://t.me/napkincode_bot?start=donate)
+
+Your support helps the project grow and improve future features!
+
+## License
+
+This project is licensed under the MIT License. It is a derivative of dsh-tidewatch by KhalilYamber; both copyright
+notices are retained in the [LICENSE](LICENSE) file.

@@ -1,85 +1,151 @@
-# dsh-tidewatch 移植说明（非 DeepSeek Harness 适配）
+# dsh-tidewatch: portable core, DSH wiring and maintenance runbook
 
-> 目标：在其他 agent / 宿主里复刻「峰谷时刻 + 会话花费」卡片。
-> 核心设计原则：**计费与峰谷数学全部在纯函数里，宿主只负责喂 usage 事件。**
+> Two audiences: whoever maintains this plugin (the runbook at the end), and whoever wants to reuse the peak/off-peak
+> and billing core in another host. One rule serves both: **all billing and peak/off-peak math lives in pure functions,
+> and the host only feeds usage events.**
 
-## 一、核心可移植单元：lib/pricing.js（零依赖）
+## 1. The portable core: lib/pricing.js (zero dependencies)
 
-整个插件的「大脑」不依赖 cordis / DSH 任何运行时：
+The plugin's "brain" depends on no cordis / DSH runtime at all:
 
-| 导出 | 作用 |
+| Export | Purpose |
 |---|---|
-| `isPeakHour(atMs)` | 某时刻是否峰时段（UTC 窗口；周末全天谷期） |
-| `peakPhaseAt(atMs)` | 当前相位 + 下一次切换点（倒计时数据源） |
-| `tierFor(entry, atMs)` | 按时刻在三段价格时代中选档：基础价（legacyBase）/ 首版峰谷价（priorPeak、priorOffPeak）/ 现行峰谷价（peak、offPeak） |
-| `costOf(tokens, entry, atMs)` | 一次调用的美元成本 |
-| `priceEntryFor(model, atMs)` | 模型名归一化匹配 + 别名表（MODEL_ALIASES）→ 价目；未命中回退 default |
-| `DEFAULT_PEAK_WINDOWS` | 峰时段窗口（UTC 小时，半开区间） |
-| `DEFAULT_PRICE_TABLE` | 官方价目（改价只动这里） |
-| `MODEL_ALIASES` | 旧模型名 / 过渡期名称 → 现役模型 key |
-| `LEGACY_BASE_BOUNDARY` | 峰谷时代起点（此前按 legacyBase 计费） |
-| `FLASH_REPRICE_BOUNDARY` | V4.1 Flash 换价分界（此前用 prior 档） |
-| `V4_PRO_RETIRE_BOUNDARY` | V4 Pro 换价分界，现为哨兵值（官方声明计费方式不变） |
+| `isPeakHour(atMs)` | Whether an instant is in a peak window (UTC windows; weekends are off-peak all day) |
+| `peakPhaseAt(atMs)` | Current phase + next switch instant (countdown data source) |
+| `tierFor(entry, atMs)` | Pick the tier by instant across three price eras: base (legacyBase) / first peak era (priorPeak, priorOffPeak) / current peak era (peak, offPeak) |
+| `costOf(tokens, entry, atMs)` | USD cost of one call |
+| `priceEntryFor(model, atMs)` | Normalized model-name matching + alias table (MODEL_ALIASES) → price entry; falls back to `default` |
+| `DEFAULT_PEAK_WINDOWS` | Peak windows (UTC hours, half-open) |
+| `DEFAULT_PRICE_TABLE` | Official price list (a price change touches only this) |
+| `MODEL_ALIASES` | Legacy / transitional model names → current model key |
+| `LEGACY_BASE_BOUNDARY` | Start of the peak era (earlier calls bill at legacyBase) |
+| `FLASH_REPRICE_BOUNDARY` | V4.1 Flash repricing boundary (earlier calls use the prior tier) |
+| `V4_PRO_RETIRE_BOUNDARY` | V4 Pro repricing boundary, currently a sentinel (official billing unchanged) |
 
-任何宿主只需做到「**按调用时刻取价目，再算成本**」：
+Any host only has to "pick the price entry by the call instant, then compute the cost":
 
 ```js
-const entry = priceEntryFor(model, event.time)   // 模型 → 价目（含历史档）
+const entry = priceEntryFor(model, event.time)   // model → price entry (with historical tiers)
 const usd = costOf({ input, output, cacheRead, cacheWrite, reasoning }, entry, event.time)
 ```
 
-就得到与官方账单口径一致的美元成本。
+and it gets the same USD cost basis as the official bill.
 
-## 二、三种适配深度
+## 2. How the card is wired into DeepSeek Harness
 
-### 1. 最轻：纯前端复刻（不接宿主数据）
-- 复制 `client.js` 里的 `isPeakHourUTC` / `nextPhase` / 时段表常量到任意 Web 界面
-- 峰谷卡片立即可用（倒计时、时段表、档位价格）
-- 会话花费留空（`usage` 为 `undefined` 时显示 ¥0.00）
+- **Host** (`lib/index.js`): `ctx.inject(['sessionProjections'])` registers the `costUsage` projection. It folds the
+  session event stream (`request/header`, `assistant/chunk` usage, `assistant/message`) into token buckets plus a USD
+  cost, billing every call by its own event instant. The `wire.view` block is what makes the projection visible to the
+  browser; without it the projection stays host-only and the card reads zero forever.
+- **Client** (`lib/client.js`): two slot seats with different jobs —
+    - `conversation.composer.dock` (session scope) mounts `Probe`, which renders `null` and exists only to obtain the
+      `useProjection` seat, writing the value into a module-level bridge store;
+    - `shell.overlay` (root scope) mounts the floating `TideCard`, which subscribes to that bridge. A root-level slot has
+      no projection seat, which is exactly why there are two components.
+- **Client, optional**: the front end prefers `require('@deepseek-ai/dsh-client-ui-primitives')` (a baseline module in the
+  shell's shared module table) for `StateDot` / `Tag` / `Tooltip` / `useDismissOnOutsidePointer`, and degrades to the
+  built-in implementations when that require throws.
 
-### 2. 标准：宿主提供 usage 流（对应 DSH 的会话投影）
-- 宿主侧实现一个「会话 token 累加器」：从流式响应收 usage 块，累加桶
-- 计费在宿主侧做（保留每次调用时刻，跨峰谷切换与跨调价才准确）
-- 前端订阅累加结果渲染（对应 DSH 的 `useProjection('costUsage')`）
+## 3. The i18n layer
 
-### 3. 完整：按 DSH 原样
-- host：`ctx.inject(['sessionProjections'])` 注册 `costUsage` 投影（lib/index.js）
-- client：**两个插槽席位，职责不同**——
-  - `conversation.composer.dock`（session 作用域）挂数据探针 `Probe`，渲染 null，
-    只为拿到 `useProjection` 席位并把投影值写进模块级 bridge；
-  - `shell.overlay`（root 作用域）挂悬浮徽章 `TideCard`，从 bridge 读值渲染
-    （root 级插槽没有投影席位，这是需要两个组件的原因）。
-- client 可选增强：优先 `require('@deepseek-ai/dsh-client-ui-primitives')`
-  （shell 共享模块表中的 baseline 模块）取 `StateDot` / `Tag` / `Tooltip` /
-  `useDismissOnOutsidePointer`，拿不到时自动退回内置实现。
+All copy lives in the `tidewatch` locale namespace as flat `key → template` dictionaries (`{name}` placeholders), shipped
+for `zh`, `en` and `ru` with an identical key set (enforced by the test suite). Three pieces make it work:
 
-## 三、DSH 特有接口速查（其他宿主请替换）
+1. **A dictionary per language** plus a lookup that walks a fallback chain (active language → English) and substitutes
+   `{name}` placeholders; an unknown key returns the key itself. `translateIn(localeId, key, params)` is the pure
+   reference implementation.
+2. **A live language source.** The card declares its namespace on the slot
+   (`slots.register({ ..., locale: NS }, TideCard)`), so the framework injects a `t` seat and re-renders the outlet on
+   every switch. Without the locale service the card falls back to the browser language and translates through
+   `translateIn`.
+3. **Language-aware formatting**, never string concatenation: `Intl.NumberFormat` for money (symbol placement, decimal
+   separator, grouping) and compact token counts, and `Intl.NumberFormat` with `minimumIntegerDigits` for countdowns.
 
-| DSH 概念 | 作用 | 移植替代 |
+Two further notes:
+
+- The language pack is optional: DSH ships only `zh` and `en`, so the plugin offers `ru` itself
+  (`addLanguage({ id: 'ru', label: 'Русский', fallback: 'en' })`).
+- The window table is **display-only localization**. `buildLocalSlots(atMs, timeZone)` maps the UTC windows onto the
+  viewer's calendar day via `Intl.DateTimeFormat.formatToParts` (offset lookup) and emits contiguous phase segments;
+  `localDayBounds` finds the local midnight.
+
+## 4. Host interface mapping
+
+| DSH concept | Purpose | Substitute in another host |
 |---|---|---|
-| `sessionProjections.register` | 会话级事件折叠（request/header、assistant/chunk usage） | 宿主自己的流式事件钩子 |
-| `useProjection('costUsage')` | 前端订阅投影视图 | 状态管理 / 订阅式 store |
-| `conversation.composer.dock` / `shell.overlay` 插槽 | 数据探针位 / 根级浮层位 | 输入区附近的容器节点 + 全局浮层 |
-| `@deepseek-ai/dsh-client-ui-primitives` | 官方共享 UI 原语（模块表 baseline） | 宿主自有控件库，或本插件的内置实现 |
-| `--dsw-*` CSS 变量 | 主题跟随 | 宿主主题变量或硬编码双主题 |
+| `sessionProjections.register` | Session-level event folding (request/header, assistant/chunk usage) | The host's own streaming event hook |
+| `useProjection('costUsage')` | Front-end subscription to the projection view | State management / an observable store |
+| `ctx.locale` + `locale: NS` on a slot | Dictionary registration and the injected `t` seat | Any i18n runtime + observable active language |
+| `conversation.composer.dock` / `shell.overlay` slots | Data-probe seat / root overlay seat | A container node near the input + a global overlay |
+| `@deepseek-ai/dsh-client-ui-primitives` | Official shared UI primitives (module-table baseline) | The host's own widget library, or this plugin's built-ins |
+| `--dsw-*` CSS variables | Theme following | Host theme variables or hard-coded light/dark pairs |
 
-## 四、注意事项
+### Design tokens
 
-- **时段判定用 UTC**：官方峰谷窗口按 UTC 定义（01:00–04:00、06:00–10:00），不要在客户端用本地时区判定；展示层再转换成本地时段表
-- **计费时刻**：用每次调用事件自带的时刻，不要用「当前时刻」回算历史调用，否则跨峰谷切换与跨调价时金额都会漂移
-- **缓存桶**：DeepSeek usage 的 `cacheReadTokens`/`cacheWriteTokens` 按命中价计费，别并进未命中输入桶
-- **半开区间**：窗口为 `[start, end)`，04:00:00 整点属于谷期
-- **周末规则**：2026-08-23 起周六/周日（UTC 自然日）全天谷期，切换点计算须跳过周末
-- **改价**：官方调价后同步 `pricing.js`（计费）与 `client.js` 的 `DISPLAY_PRICES`（展示），
-  并为被替换的旧价**补一段历史档**（`priorPeak` / `priorOffPeak` 的成例）；否则历史会话
-  重放时会按新价计算，静默低估
+The card is styled as a harbor tide gauge: a single saturated phase accent (amber = peak, green = off-peak), micro-caps
+labels, and every figure in the host's mono stack (`--ds-font-family-code`) with tabular numerals. It reads its whole
+palette from `--dsw-*` variables, and each plugin-local token (`--tw-surface`, `--tw-inset`, `--tw-line`, `--tw-text`,
+`--tw-muted`, `--tw-faint`, `--tw-peak-soft`, `--tw-off-soft`) carries a **scheme-aware fallback**: light values by
+default, dark values under `@media (prefers-color-scheme: dark)` and under `body[data-ds-dark-theme]`. That keeps the card
+correct both inside DSH and on a host with no theme layer, and it avoids two classic mistakes — a hard-coded dark slab on a
+light UI, and low-contrast accent text (the accent is mixed toward the text colour for anything that must be read, while
+bars, dots and fills keep the pure accent). The panel deliberately uses `--dsw-alias-bg-layer-2`, not
+`--dsw-alias-bg-overlay`: in the dark theme the latter is a flat mid-grey slab that reads as dead space behind dense
+content.
 
-## 五、验证清单（node test/verify.mjs，39 项）
+## 5. Runbook and pitfalls
 
-- 峰谷窗口边界（01:00 / 04:00 / 06:00 / 10:00 整点归属）与周末规则
-- 下一切换点计算（跨午夜窗口、周末 → 下周一）
-- 三段价格时代（基础价 / 首版峰谷价 / 现行价）与换价分界前后一刻
-- 模型别名命中、未知模型回退 default
-- pro 换价分界哨兵值（当前不触发，pro 恒按自身价目）
-- 缓存读写按命中价计费、负 token 非负保护
-- 双份常量一致性（client 的 `PEAK_WINDOWS` / `DISPLAY_PRICES` / `MODEL_ALIASES` 与 pricing 对齐）
+- **Changing prices — the one recurring task.** Update both `lib/pricing.js` (billing) and `DISPLAY_PRICES` in
+  `lib/client.js` (display), and add the superseded tier as another historical era following the `priorPeak` /
+  `priorOffPeak` example. Missing either half, or skipping the historical tier, silently reprices every replayed session.
+  The test suite asserts that the two constant sets stay in sync.
+- **Decide the phase in UTC.** The official windows are defined in UTC (01:00–04:00, 06:00–10:00); never judge in the
+  browser's local zone, only render locally.
+- **Bill by the event instant.** Use the instant attached to each call, not "now" recomputed for past calls, or amounts
+  drift across phase switches and price changes.
+- **Cache buckets.** `cacheReadTokens` / `cacheWriteTokens` bill at the cache-hit price; do not merge them into the
+  cache-miss input bucket.
+- **Half-open intervals.** Windows are `[start, end)`, so exactly 04:00:00 is off-peak.
+- **Weekend rule.** Since 2026-08-23 Saturday and Sunday (UTC calendar days) are off-peak all day, and switch-point
+  computation must skip weekends.
+- **One dictionary key set.** Add a key to every dictionary or the suite fails; never concatenate translated fragments to
+  build a sentence — use a `{placeholder}` template so each language controls word order.
+- **Panel height.** The expanded panel's budget is measured from the badge's real top edge (`panelHeightBudget`) and
+  applied inline; the CSS value is only a fallback for the first frame. Do not reintroduce a fixed `100vh` reserve — on a
+  phone it either clips the panel or adds a scrollbar while space is still free.
+- **Never put a `position: fixed` tooltip inside the panel.** The panel is both a scroll container (`overflow-y`) and —
+  because of `backdrop-filter` — a containing block for fixed descendants, so a fixed bubble resolves in panel coordinates
+  and inflates the scrollable overflow into a scrollbar with nothing to scroll (plus a layout shift). The DSH Tooltip
+  renders exactly such a bubble as a sibling span, which is why the session-cost row uses a native `title`. Remove the
+  panel's `backdrop-filter` before reintroducing an in-panel tooltip.
+
+## 6. Where the checks live
+
+`node test/verify.mjs` is the single source of truth for the checked behaviour: peak windows, billing eras, duplicated
+constants, dictionary parity, translation and formatting, time zones, the panel height budget and the no-Chinese guard. Run
+it — this file deliberately does not repeat the list, so the two cannot drift apart.
+
+## 7. Releasing
+
+Releases are cut from a version tag; `.github/workflows/release.yml` does the rest:
+
+1. Bump `version` in `package.json`.
+2. Add a matching section to `CHANGELOG.md` — the heading must be exactly `## v. <version>` (for example `## v. 2.1.0`).
+   The workflow copies that section into the Release body verbatim, and fails the run if it is missing.
+3. Commit, then tag and push:
+
+   ```sh
+   git tag v2.1.0
+   git push origin v2.1.0
+   ```
+
+The workflow verifies that the tag matches `package.json`, runs `npm run check` and `npm test`, builds the tarball with
+`npm pack`, and creates the GitHub Release with `dsh-tidewatch-<version>.tgz` attached. That tarball is what the README
+offers as the pinned install URL.
+
+There is no npm publish, deliberately. The npm name `dsh-tidewatch` belongs to the original author (1.0.6, 2026-08-22), so
+publishing would force a rename or a scope and change the string users type for no functional gain: DeepSeek Harness
+installs any pnpm spec, including a git tag (`github:proDreams/dsh-tidewatch#v2.0.0`) or the release tarball. Discovery in
+this ecosystem runs on the GitHub `dsh-plugin` topic and the `dshhub` block in `package.json`, not on an npm listing. The
+workflow header documents the exact steps to add npm later if that ever changes.
+
