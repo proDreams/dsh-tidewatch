@@ -11,8 +11,8 @@ node --check lib/pricing.js
 node --check lib/index.js
 node --check lib/client.js
 
-# 依赖 junction：从 checkout 链接 zod（投影 schema 需 zod v4 实例）。
-# 通过环境变量 DSH_CHECKOUT 指定 DeepSeek Harness 源码根目录（含 node_modules/zod）。
+# Dependency junction: link zod from the checkout (the projection schema needs a zod v4 instance).
+# Point DSH_CHECKOUT at the DeepSeek Harness source root (the one containing node_modules/zod).
 CHECKOUT="${DSH_CHECKOUT:-}"
 if [ -n "$CHECKOUT" ] && [ -d "$CHECKOUT/node_modules/zod" ]; then
   mkdir -p node_modules
