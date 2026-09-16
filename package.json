@@ -1,7 +1,7 @@
 {
   "name": "dsh-tidewatch",
-  "version": "1.1.3",
-  "description": "DeepSeek 峰谷时刻悬浮卡片：官方峰谷时段、当前档位、距下一阶段倒计时与本次会话 API 花费（人民币）。A floating tide card for DeepSeek Harness: official peak/off-peak windows, live phase countdown and this session's API cost in CNY.",
+  "version": "2.0.0",
+  "description": "A floating tide card for DeepSeek Harness: official peak/off-peak windows, the active tier, a live countdown to the next switch, and this session's API cost. Card copy follows the interface language (zh/en/ru) and the window table renders in the viewer's own time zone.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -12,6 +12,10 @@
       "default": "./lib/client.js"
     },
     "./package.json": "./package.json"
+  },
+  "scripts": {
+    "check": "node --check lib/index.js && node --check lib/pricing.js && node --check lib/client.js",
+    "test": "node test/verify.mjs"
   },
   "dsh": {
     "bundle": {
@@ -24,8 +28,8 @@
   "dshhub": {
     "schemaVersion": 1,
     "displayName": "dsh-tidewatch",
-    "summary": "DeepSeek 峰谷时刻悬浮卡片：官方峰谷时段（UTC 01:00–04:00 / 06:00–10:00 = 北京 09:00–12:00 / 14:00–18:00）、当前档位状态点、距下一阶段倒计时、本次会话 Token 明细与人民币费用（汇率可配）。",
-    "categories": ["费用", "Web UI", "观测"],
+    "summary": "A floating peak/off-peak tide card: official windows (UTC 01:00-04:00 / 06:00-10:00, shown in the viewer's time zone), a live phase dot, a countdown to the next switch, and this session's token breakdown with a locale-aware cost display. UI copy follows the DeepSeek Harness interface language (zh/en/ru).",
+    "categories": ["Cost", "Web UI", "Observability"],
     "surfaces": ["host", "web"],
     "capabilities": {
       "provides": ["projection:costUsage"]
@@ -37,7 +41,9 @@
   },
   "files": [
     "lib",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "README-RU.md",
+    "CHANGELOG.md"
   ],
   "dependencies": {
     "zod": "^4.4.3"
@@ -56,11 +62,21 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/KhalilYamber/dsh-tidewatch.git"
+    "url": "git+https://github.com/proDreams/dsh-tidewatch.git"
   },
-  "homepage": "https://github.com/KhalilYamber/dsh-tidewatch#readme",
+  "homepage": "https://github.com/proDreams/dsh-tidewatch#readme",
   "bugs": {
-    "url": "https://github.com/KhalilYamber/dsh-tidewatch/issues"
+    "url": "https://github.com/proDreams/dsh-tidewatch/issues"
+  },
+  "author": "Ivan Ashikhmin",
+  "contributors": [
+    "KhalilYamber (original dsh-tidewatch)"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "license": "MIT"
 }
