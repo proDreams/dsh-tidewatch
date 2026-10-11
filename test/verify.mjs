@@ -512,6 +512,41 @@ await okAsync('apply still registers dictionaries through optional injection wit
   assert.equal(badge.spec.locale, undefined)
 })
 
+// ── Bridge ownership (the sessions list publishes no `current`) ──────────────
+ok('the card never selects a `current` field off the sessions snapshot', () => {
+  // Regression guard: on shells whose sessions-list snapshot carries no `current`
+  // this selection is always undefined, the ownership check never matches the
+  // probe's real session id, and the displayed cost is pinned to 0.
+  const source = readFileSync(join(libDir, 'client.js'), 'utf8')
+  assert.ok(
+    !/useSessions\(s\s*=>\s*s\.current\)/.test(source),
+    'client.js must not select `s.current` from the sessions list',
+  )
+  assert.ok(source.includes('useSessions(sessionListCurrentId)'), 'the card must resolve its owner through sessionListCurrentId')
+})
+
+ok('bridge ownership resolves the session the main view retains', () => {
+  const snapshot = {
+    ids: ['session-a', 'session-b'],
+    byId: {
+      'session-a': { sessionId: 'session-a', retainedBy: { mainView: 0 } },
+      'session-b': { sessionId: 'session-b', retainedBy: { mainView: 1 } },
+    },
+    phase: 'ready',
+    projectionsBySession: {},
+  }
+  assert.equal(I.sessionListCurrentId(snapshot), 'session-b')
+})
+
+ok('bridge ownership reports "unknown" instead of a false owner', () => {
+  // The shell snapshot is { ids, byId, phase, projectionsBySession }: an empty
+  // list, an absent snapshot and a released main view must all read as unknown so
+  // the card can trust the probe rather than discard every value.
+  assert.equal(I.sessionListCurrentId({ ids: [], byId: {}, phase: 'pending', projectionsBySession: {} }), undefined)
+  assert.equal(I.sessionListCurrentId(undefined), undefined)
+  assert.equal(I.sessionListCurrentId({ ids: ['session-a'], byId: { 'session-a': { sessionId: 'session-a' } } }), undefined)
+})
+
 // ── No Chinese copy outside the Chinese dictionary ──
 ok('no Chinese remains in the code, metadata, docs or scripts', () => {
   const cjk = /[\u4e00-\u9fff]/
