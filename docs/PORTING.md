@@ -118,6 +118,12 @@ content.
   and inflates the scrollable overflow into a scrollbar with nothing to scroll (plus a layout shift). The DSH Tooltip
   renders exactly such a bubble as a sibling span, which is why the session-cost row uses a native `title`. Remove the
   panel's `backdrop-filter` before reintroducing an in-panel tooltip.
+- **The sessions list publishes no `current`.** `useSessions` resolves to `ctx.sessions.list`, whose snapshot is
+  `{ ids, byId, phase, projectionsBySession }`; selecting `s.current` is always `undefined`, so a strict ownership check
+  silently discards every bridged value — which is what pinned the session cost to zero on dsh `0.2.0-rc.2`. Resolve the
+  owner from the row the main view retains (`retainedBy.mainView`, see `sessionListCurrentId`) and keep the check tolerant;
+  the probe clears the bridge on mount, so a session switch still cannot show a stale amount. Three regression checks in
+  the suite guard this.
 
 ## 6. Where the checks live
 
