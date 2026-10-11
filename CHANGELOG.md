@@ -1,6 +1,20 @@
 > Fork history starts at 2.0.0. Versions 1.0.x–1.1.x belong to the original project:
 > [KhalilYamber/dsh-tidewatch](https://github.com/KhalilYamber/dsh-tidewatch).
 
+## v. 2.0.1
+
+- **Fixed the session cost on dsh 0.2.0-rc.2**:
+    - The card keyed its bridge ownership on `sessions.current`, a field the sessions-list snapshot no longer publishes
+      (it is now `{ ids, byId, phase, projectionsBySession }`). The owner never matched the probe's session id, so `usage`
+      stayed `null` and the cost was pinned to `0.0000`, while the phase and the countdown — which never read `usage` —
+      kept rendering correctly.
+    - The owner is now resolved from the row the main view retains (`retainedBy.mainView`), and the check stays tolerant:
+      when the list cannot tell, the card trusts the probe, which clears the bridge on mount so a session switch still
+      cannot surface a stale amount.
+    - Reported and fixed by [@sh-222](https://github.com/sh-222) in
+      [#1](https://github.com/proDreams/dsh-tidewatch/pull/1).
+- **Tests**: three regression checks in `node test/verify.mjs` (73 passed).
+
 ## v. 2.0.0
 
 - **Real i18n instead of hard-coded Chinese**:

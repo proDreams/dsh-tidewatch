@@ -1,6 +1,6 @@
 {
   "name": "dsh-tidewatch",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "A floating tide card for DeepSeek Harness: official peak/off-peak windows, the active tier, a live countdown to the next switch, and this session's API cost. Card copy follows the interface language (zh/en/ru) and the window table renders in the viewer's own time zone.",
   "type": "module",
   "main": "lib/index.js",

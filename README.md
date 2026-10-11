@@ -85,10 +85,10 @@ locale.
 dsh plugin --profile web add github:proDreams/dsh-tidewatch
 
 # Option 2: a pinned release tag (reproducible installs)
-dsh plugin --profile web add github:proDreams/dsh-tidewatch#v2.0.0
+dsh plugin --profile web add github:proDreams/dsh-tidewatch#v2.0.1
 
 # Option 3: the tarball attached to a GitHub Release (pinned and offline-friendly)
-dsh plugin --profile web add https://github.com/proDreams/dsh-tidewatch/releases/download/v2.0.0/dsh-tidewatch-2.0.0.tgz
+dsh plugin --profile web add https://github.com/proDreams/dsh-tidewatch/releases/download/v2.0.1/dsh-tidewatch-2.0.1.tgz
 
 # Local directory (development)
 dsh plugin --profile web add link:/path/to/dsh-tidewatch
@@ -241,7 +241,7 @@ model-call usage blocks (assistant/chunk, assistant/message events)
 
 ```sh
 DSH_CHECKOUT=<harness source root> bash scripts/build.sh   # syntax check + zod junction
-node test/verify.mjs                                       # 70 checks: peak math, billing, i18n, time zones
+node test/verify.mjs                                       # 73 checks: peak math, billing, i18n, time zones
 ```
 
 The suite materializes the real client bundle against a stub React and a fake plugin context, so it exercises the

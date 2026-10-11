@@ -84,10 +84,10 @@
 dsh plugin --profile web add github:proDreams/dsh-tidewatch
 
 # Вариант 2: закреплённый тег релиза (воспроизводимая установка)
-dsh plugin --profile web add github:proDreams/dsh-tidewatch#v2.0.0
+dsh plugin --profile web add github:proDreams/dsh-tidewatch#v2.0.1
 
 # Вариант 3: тарбол из GitHub-релиза (закреплённый и удобный для офлайна)
-dsh plugin --profile web add https://github.com/proDreams/dsh-tidewatch/releases/download/v2.0.0/dsh-tidewatch-2.0.0.tgz
+dsh plugin --profile web add https://github.com/proDreams/dsh-tidewatch/releases/download/v2.0.1/dsh-tidewatch-2.0.1.tgz
 
 # Локальная директория (для разработки)
 dsh plugin --profile web add link:/path/to/dsh-tidewatch
@@ -240,7 +240,7 @@ dsh-tidewatch
 
 ```sh
 DSH_CHECKOUT=<корень исходников харнесса> bash scripts/build.sh   # проверка синтаксиса + junction для zod
-node test/verify.mjs                                              # 70 проверок: математика пика, биллинг, i18n, таймзоны
+node test/verify.mjs                                              # 73 проверки: математика пика, биллинг, i18n, таймзоны
 ```
 
 Набор тестов материализует настоящий клиентский бандл с заглушкой React и фейковым контекстом плагина, поэтому проверяет
