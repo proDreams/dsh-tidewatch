@@ -17,9 +17,9 @@ import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
-  isPeakHour, peakPhaseAt, costOf, priceEntryFor,
+  isPeakHour, peakPhaseAt, costOf, priceEntryFor, isCnHoliday,
   DEFAULT_PEAK_WINDOWS, DEFAULT_PRICE_TABLE, LEGACY_BASE_BOUNDARY, FLASH_REPRICE_BOUNDARY,
-  V4_PRO_RETIRE_BOUNDARY, MODEL_ALIASES,
+  V4_PRO_RETIRE_BOUNDARY, MODEL_ALIASES, CN_HOLIDAY_RANGES,
 } from '../lib/pricing.js'
 
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -65,6 +65,19 @@ ok('client DISPLAY_PRICES matches pricing DEFAULT_PRICE_TABLE for every tier', (
 ok('client MODEL_ALIASES matches pricing MODEL_ALIASES', () => {
   assert.deepEqual(extractClientConst('MODEL_ALIASES'), MODEL_ALIASES)
 })
+ok('client CN_HOLIDAY_RANGES matches pricing CN_HOLIDAY_RANGES', () => {
+  assert.deepEqual(extractClientConst('CN_HOLIDAY_RANGES'), CN_HOLIDAY_RANGES)
+  assert.equal(CN_HOLIDAY_RANGES.length, 7, 'seven holiday periods in 2026')
+  let days = 0
+  for (const [from, to] of CN_HOLIDAY_RANGES) {
+    assert.match(from, /^\d{4}-\d{2}-\d{2}$/)
+    assert.match(to, /^\d{4}-\d{2}-\d{2}$/)
+    const span = (Date.parse(to + 'T00:00:00Z') - Date.parse(from + 'T00:00:00Z')) / 86400000
+    assert.ok(span >= 0, `range ${from}..${to} is inverted`)
+    days += span + 1
+  }
+  assert.equal(days, 33, 'the 2026 arrangement covers 33 days')
+})
 
 // ── isPeakHour (UTC peak windows 01:00-04:00 / 06:00-10:00) ──
 ok('UTC 07:00 is within the peak window (06:00-10:00)', () => {
@@ -84,6 +97,33 @@ ok('UTC 03:59 is peak (half-open interval boundary)', () => {
 })
 ok('UTC 04:00 is off-peak (half-open interval boundary)', () => {
   assert.equal(isPeakHour(Date.parse('2026-08-19T04:00:00Z')), false)
+})
+
+// ── Chinese statutory holidays (pricing-page footnote 2: peak excludes them) ──
+ok('the Beijing calendar date decides a holiday', () => {
+  // Beijing midnight is 16:00 UTC on the previous day.
+  assert.equal(isCnHoliday(Date.parse('2026-09-30T15:59:59Z')), false) // 23:59 Beijing, Sep 30
+  assert.equal(isCnHoliday(Date.parse('2026-09-30T16:00:00Z')), true) // 00:00 Beijing, Oct 1
+  assert.equal(isCnHoliday(Date.parse('2026-10-07T15:59:59Z')), true) // last holiday instant
+  assert.equal(isCnHoliday(Date.parse('2026-10-07T16:00:00Z')), false) // 00:00 Beijing, Oct 8
+  assert.equal(isCnHoliday(Date.parse('2026-02-23T02:00:00Z')), true) // last Spring Festival day
+  assert.equal(isCnHoliday(Date.parse('2026-02-24T02:00:00Z')), false) // the day after
+})
+ok('a holiday weekday is off-peak, the neighbour is not', () => {
+  assert.equal(isPeakHour(Date.parse('2026-10-01T02:00:00Z')), false) // 10:00 Beijing, National Day
+  assert.equal(isPeakHour(Date.parse('2026-10-09T02:00:00Z')), true) // the Friday after
+  assert.equal(isPeakHour(Date.parse('2026-09-25T02:00:00Z')), false) // 10:00 Beijing, Mid-Autumn (Friday)
+  assert.equal(isPeakHour(Date.parse('2026-09-24T02:00:00Z')), true) // the Thursday before
+})
+ok('a make-up working weekend stays off-peak', () => {
+  // 2026-02-14 is a swapped working Saturday, but the footnote bills every weekend as off-peak.
+  assert.equal(isPeakHour(Date.parse('2026-02-14T02:00:00Z')), false) // 10:00 Beijing
+})
+ok('a holiday weekday bills at the off-peak rate', () => {
+  const flash = priceEntryFor('deepseek-flash')
+  const tokens = { input: 1e6, output: 0, cacheRead: 0, cacheWrite: 0 }
+  assert.equal(costOf(tokens, flash, Date.parse('2026-10-01T02:00:00Z')), 0.15) // off-peak cache miss
+  assert.equal(costOf(tokens, flash, Date.parse('2026-10-09T02:00:00Z')), 0.3) // peak cache miss
 })
 
 // ── Weekend rule (official since 2026-08-23: Saturday/Sunday UTC are off-peak all day) ──
@@ -129,6 +169,30 @@ ok('12:00 UTC phase and next switch (next day 01:00 into peak)', () => {
   const ph = peakPhaseAt(Date.parse('2026-08-19T12:00:00Z'), DEFAULT_PEAK_WINDOWS)
   assert.equal(ph.inPeak, false)
   assert.equal(ph.nextAtMs, Date.parse('2026-08-20T01:00:00Z'))
+  assert.equal(ph.nextIntoPeak, true)
+})
+ok('the Monday 08:00 Beijing gap resolves both neighbours', () => {
+  // The collection window used to start two days back, so Monday 00:00-01:00 UTC
+  // (08:00-09:00 Beijing) had no previous switch (Friday) and returned null.
+  const ph = peakPhaseAt(Date.parse('2026-10-19T00:00:00Z'))
+  assert.notEqual(ph, null)
+  assert.equal(ph.inPeak, false)
+  assert.equal(ph.prevAtMs, Date.parse('2026-10-16T10:00:00Z')) // Friday 18:00 Beijing
+  assert.equal(ph.nextAtMs, Date.parse('2026-10-19T01:00:00Z')) // Monday 09:00 Beijing
+  assert.equal(ph.nextIntoPeak, true)
+})
+ok('the National Day gap counts down to the next peak', () => {
+  const ph = peakPhaseAt(Date.parse('2026-10-05T02:00:00Z')) // 10:00 Beijing, a Monday holiday
+  assert.equal(ph.inPeak, false)
+  assert.equal(ph.prevAtMs, Date.parse('2026-09-30T10:00:00Z')) // Wednesday 18:00 Beijing
+  assert.equal(ph.nextAtMs, Date.parse('2026-10-08T01:00:00Z')) // Thursday 09:00 Beijing
+  assert.equal(ph.nextIntoPeak, true)
+})
+ok('the Spring Festival gap is inside the collection window', () => {
+  const ph = peakPhaseAt(Date.parse('2026-02-16T02:00:00Z')) // 10:00 Beijing, inside the 9-day break
+  assert.equal(ph.inPeak, false)
+  assert.equal(ph.prevAtMs, Date.parse('2026-02-13T10:00:00Z')) // Friday 18:00 Beijing
+  assert.equal(ph.nextAtMs, Date.parse('2026-02-24T01:00:00Z')) // Tuesday 09:00 Beijing
   assert.equal(ph.nextIntoPeak, true)
 })
 
@@ -431,6 +495,17 @@ ok('a local Saturday in Asia/Shanghai is off-peak all day', () => {
   const schedule = I.buildLocalSlots(Date.parse('2026-09-12T12:00:00Z'), 'Asia/Shanghai')
   assert.equal(slotShape(schedule, 'Asia/Shanghai'), '00:00-24:00:off')
 })
+ok('a holiday collapses to a single off-peak row', () => {
+  const schedule = I.buildLocalSlots(Date.parse('2026-10-05T12:00:00Z'), 'UTC')
+  assert.equal(slotShape(schedule, 'UTC'), '00:00-24:00:off')
+  const shanghai = I.buildLocalSlots(Date.parse('2026-10-05T12:00:00Z'), 'Asia/Shanghai')
+  assert.equal(slotShape(shanghai, 'Asia/Shanghai'), '00:00-24:00:off')
+})
+ok('the working day after a holiday renders its normal windows', () => {
+  const schedule = I.buildLocalSlots(Date.parse('2026-10-08T12:00:00Z'), 'Asia/Shanghai')
+  assert.equal(slotShape(schedule, 'Asia/Shanghai'),
+    '00:00-09:00:off | 09:00-12:00:peak | 12:00-14:00:off | 14:00-18:00:peak | 18:00-24:00:off')
+})
 ok('segments tile the whole day without gaps or overlaps', () => {
   for (const zone of ['UTC', 'Asia/Shanghai', 'Europe/Moscow', 'America/Los_Angeles', 'Asia/Kathmandu']) {
     for (const at of ['2026-09-11T12:00:00Z', '2026-09-12T12:00:00Z', '2026-01-15T20:00:00Z', '2026-07-15T20:00:00Z']) {
@@ -455,6 +530,19 @@ ok('nextPhase reports the current phase bounds for the tide line', () => {
   assert.equal(peak.prevAtMs, Date.parse('2026-09-11T06:00:00Z'))
   assert.equal(peak.nextAtMs, Date.parse('2026-09-11T10:00:00Z'))
   assert.equal(peak.nextIntoPeak, false)
+})
+ok('the client countdown survives the Monday 08:00 Beijing gap', () => {
+  const ph = I.nextPhase(Date.parse('2026-10-19T00:00:00Z'))
+  assert.notEqual(ph, null)
+  assert.equal(ph.inPeak, false)
+  assert.equal(ph.prevAtMs, Date.parse('2026-10-16T10:00:00Z'))
+  assert.equal(ph.nextAtMs, Date.parse('2026-10-19T01:00:00Z'))
+})
+ok('the client countdown spans the National Day break', () => {
+  const ph = I.nextPhase(Date.parse('2026-10-05T02:00:00Z'))
+  assert.equal(ph.inPeak, false)
+  assert.equal(ph.prevAtMs, Date.parse('2026-09-30T10:00:00Z'))
+  assert.equal(ph.nextAtMs, Date.parse('2026-10-08T01:00:00Z'))
 })
 ok('nextPhase spans a weekend from Friday off-peak to Monday peak', () => {
   const weekend = I.nextPhase(Date.parse('2026-09-12T12:00:00Z'))
