@@ -522,20 +522,24 @@ ok('the card never selects a `current` field off the sessions snapshot', () => {
     !/useSessions\(s\s*=>\s*s\.current\)/.test(source),
     'client.js must not select `s.current` from the sessions list',
   )
-  assert.ok(source.includes('useSessions(sessionListCurrentId)'), 'the card must resolve its owner through sessionListCurrentId')
+  assert.ok(source.includes('sessionListCurrentId(sessionsState)'), 'the card must resolve its owner through sessionListCurrentId')
 })
 
 ok('bridge ownership resolves the session the main view retains', () => {
+  // Real shell rows are identified by `id` (the composite key); `sessionId` is only a
+  // compatibility fallback. Reading `sessionId` alone yielded undefined on every real
+  // snapshot and silently disabled the ownership check.
   const snapshot = {
     ids: ['session-a', 'session-b'],
     byId: {
-      'session-a': { sessionId: 'session-a', retainedBy: { mainView: 0 } },
-      'session-b': { sessionId: 'session-b', retainedBy: { mainView: 1 } },
+      'session-a': { id: 'session-a', retainedBy: { mainView: 0 } },
+      'session-b': { id: 'session-b', retainedBy: { mainView: 1 } },
     },
     phase: 'ready',
     projectionsBySession: {},
   }
   assert.equal(I.sessionListCurrentId(snapshot), 'session-b')
+  assert.equal(I.sessionListCurrentId({ byId: { x: { sessionId: 'x', retainedBy: { mainView: 1 } } } }), 'x')
 })
 
 ok('bridge ownership reports "unknown" instead of a false owner', () => {
@@ -544,7 +548,85 @@ ok('bridge ownership reports "unknown" instead of a false owner', () => {
   // the card can trust the probe rather than discard every value.
   assert.equal(I.sessionListCurrentId({ ids: [], byId: {}, phase: 'pending', projectionsBySession: {} }), undefined)
   assert.equal(I.sessionListCurrentId(undefined), undefined)
-  assert.equal(I.sessionListCurrentId({ ids: ['session-a'], byId: { 'session-a': { sessionId: 'session-a' } } }), undefined)
+  assert.equal(I.sessionListCurrentId({ ids: ['session-a'], byId: { 'session-a': { id: 'session-a' } } }), undefined)
+})
+
+// ── Subagent rollup (session cost includes descendant sessions) ──────────────
+const lineage = () => ({
+  main: { id: 'main', retainedBy: { mainView: 1 } },
+  'sub-1': { id: 'sub-1', parentId: 'main', origin: 'subagent' },
+  'sub-2': { id: 'sub-2', parentId: 'main', origin: 'subagent' },
+  'sub-1-1': { id: 'sub-1-1', parentId: 'sub-1', origin: 'subagent' },
+  other: { id: 'other', origin: 'user' },
+})
+const costView = cost => ({
+  input: 1000,
+  output: 100,
+  cacheRead: 10000,
+  cacheWrite: 0,
+  reasoning: 0,
+  cost,
+  byModel: { 'deepseek-flash': { input: 1000, output: 100, cacheRead: 10000, cacheWrite: 0, reasoning: 0, cost } },
+})
+
+ok('the subagent rollup needs a current session to walk', () => {
+  assert.equal(I.rollupDescendantCost({}, {}, undefined), null)
+  assert.equal(I.rollupDescendantCost(undefined, undefined, 'main'), null)
+})
+
+ok('the subagent rollup sums nested descendants and excludes the current session', () => {
+  const projections = {
+    main: { values: { costUsage: costView(9) } },
+    other: { values: { costUsage: costView(9) } },
+    'sub-1': { values: { costUsage: costView(0.5) } },
+    'sub-2': { values: { costUsage: costView(0.25) } },
+    'sub-1-1': { values: { costUsage: costView(0.125) } },
+  }
+  const rollup = I.rollupDescendantCost(lineage(), projections, 'main')
+  assert.equal(rollup.count, 3)
+  assert.ok(Math.abs(rollup.cost - 0.875) < 1e-9, String(rollup.cost))
+  assert.ok(Math.abs(rollup.byModel['deepseek-flash'].cost - 0.875) < 1e-9)
+  assert.equal(rollup.tokens.input, 3000)
+  assert.equal(rollup.tokens.cacheRead, 30000)
+})
+
+ok('the subagent rollup falls back to the list row and skips a loading projection', () => {
+  const byId = lineage()
+  byId['sub-1'].projectionValues = { costUsage: costView(0.5) }
+  // sub-2 has no projection at all yet; sub-1-1 is still loading. Count only what
+  // actually contributed, so the label and the amount always agree.
+  const projections = { 'sub-1-1': { values: {}, state: 'loading' } }
+  const rollup = I.rollupDescendantCost(byId, projections, 'main')
+  assert.equal(rollup.count, 1)
+  assert.ok(Math.abs(rollup.cost - 0.5) < 1e-9)
+})
+
+ok('the subagent rollup cannot loop on a malformed parentId chain', () => {
+  const byId = {
+    main: { id: 'main', parentId: 'b' },
+    a: { id: 'a', parentId: 'main' },
+    b: { id: 'b', parentId: 'a' },
+  }
+  const projections = {
+    main: { values: { costUsage: costView(9) } },
+    a: { values: { costUsage: costView(0.1) } },
+    b: { values: { costUsage: costView(0.2) } },
+  }
+  const rollup = I.rollupDescendantCost(byId, projections, 'main')
+  assert.equal(rollup.count, 2)
+  assert.ok(Math.abs(rollup.cost - 0.3) < 1e-9)
+})
+
+ok('mergeModelBuckets adds the subagent rollup onto the live projection', () => {
+  const merged = I.mergeModelBuckets(
+    { 'deepseek-flash': { input: 10, output: 2, cacheRead: 100, cacheWrite: 0, reasoning: 1, cost: 0.5 } },
+    {
+      'deepseek-flash': { input: 5, output: 1, cacheRead: 50, cacheWrite: 0, reasoning: 0, cost: 0.25 },
+      'deepseek-v4-pro': { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: 0.1 },
+    },
+  )
+  assert.deepEqual(merged['deepseek-flash'], { input: 15, output: 3, cacheRead: 150, cacheWrite: 0, reasoning: 1, cost: 0.75 })
+  assert.deepEqual(merged['deepseek-v4-pro'], { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: 0.1 })
 })
 
 // ── No Chinese copy outside the Chinese dictionary ──
