@@ -54,8 +54,8 @@ locale.
 - **Tide line** — the header shows how much of the current phase has already elapsed.
 - **Window table in your time zone** — the official UTC windows mapped onto your own calendar day, with the current row
   marked; the tier itself is always decided in UTC (the official definition).
-- **Weekend rule** — Saturday and Sunday (UTC calendar days) are off-peak all day, so the table collapses into a single
-  all-day row.
+- **Weekend and holiday rule** — Saturday/Sunday and Chinese statutory holidays are off-peak all day, so the table
+  collapses into a single all-day row and the countdown jumps to the next working peak.
 - **Active tier rates** — cache-miss / cache-hit input prices and the output price per 1M tokens for the phase you are
   in.
 - **Session tokens** — input, cache (read + write), output and reasoning, formatted per locale.
@@ -86,10 +86,10 @@ locale.
 dsh plugin --profile web add github:proDreams/dsh-tidewatch
 
 # Option 2: a pinned release tag (reproducible installs)
-dsh plugin --profile web add github:proDreams/dsh-tidewatch#v2.1.0
+dsh plugin --profile web add github:proDreams/dsh-tidewatch#v2.1.1
 
 # Option 3: the tarball attached to a GitHub Release (pinned and offline-friendly)
-dsh plugin --profile web add https://github.com/proDreams/dsh-tidewatch/releases/download/v2.1.0/dsh-tidewatch-2.1.0.tgz
+dsh plugin --profile web add https://github.com/proDreams/dsh-tidewatch/releases/download/v2.1.1/dsh-tidewatch-2.1.1.tgz
 
 # Local directory (development)
 dsh plugin --profile web add link:/path/to/dsh-tidewatch
@@ -168,8 +168,10 @@ DeepSeek introduced peak/off-peak time-of-day pricing on 2026-08-17:
 Off-peak prices are half of the peak prices. The card decides the tier from the **UTC** windows (the official
 definition) and renders the table in the viewer's own time zone.
 
-**Weekend rule (since 2026-08-23)**: Saturday and Sunday (UTC calendar days) bill at off-peak prices all day with no
-peak/off-peak switch; the next switch lands at the first peak window of the following Monday.
+**Weekends and Chinese holidays**: Saturday and Sunday (UTC calendar days) and Chinese statutory public holidays (a
+built-in table of Beijing calendar dates, 2026) bill at off-peak prices all day with no peak/off-peak switch; the next
+switch lands at the first peak window of the next working day. Peak windows start at 01:00 and 06:00 UTC, so the UTC and
+Beijing dates agree inside a window, and the countdown spans long breaks (Spring Festival, National Day).
 
 ## Billing model
 
@@ -257,7 +259,7 @@ model-call usage blocks (assistant/chunk, assistant/message events)
 
 ```sh
 DSH_CHECKOUT=<harness source root> bash scripts/build.sh   # syntax check + zod junction
-node test/verify.mjs                                       # 78 checks: peak math, billing, i18n, time zones
+node test/verify.mjs                                       # 90 checks: peak math, billing, i18n, time zones
 ```
 
 The suite materializes the real client bundle against a stub React and a fake plugin context, so it exercises the
@@ -276,6 +278,10 @@ them.
   `deepseek-v4-flash-vision-exp` and `deepseek-v4.1-flash` are all billed at the current flash rate (see
   `MODEL_ALIASES`).
 - **Tier judgement is fixed to UTC** (the official definition); the window table is display-only localization.
+- **The holiday table is maintained by hand**: it carries the 33 Chinese statutory holiday days of 2026 in both
+  `lib/pricing.js` and `lib/client.js`; extend both copies every November, when the State Council publishes the next
+  year's notice (the parity check keeps them in sync). Make-up workdays on borrowed weekends stay off-peak, because the
+  official rule bills every weekend as off-peak.
 - **The CNY display is a fixed-rate conversion** (6.67 USD → CNY, matching the official CNY prices), not a live rate.
 
 ## Credits

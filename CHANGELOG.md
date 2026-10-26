@@ -1,6 +1,28 @@
 > Fork history starts at 2.0.0. Versions 1.0.x–1.1.x belong to the original project:
 > [KhalilYamber/dsh-tidewatch](https://github.com/KhalilYamber/dsh-tidewatch).
 
+## v. 2.1.1
+
+- **Chinese statutory holidays now bill as off-peak**:
+    - The official pricing footnote defines peak as Beijing Mon–Fri 09:00–12:00 and 14:00–18:00 *excluding Chinese
+      statutory holidays*, with weekends and those holidays off-peak all day. The plugin only carried the weekend rule,
+      so every weekday holiday inside the windows billed at double the correct rate.
+    - A built-in table now carries the 2026 arrangement — 33 days from the State Council notice of 2025-11-04 — in both
+      `lib/pricing.js` and the client bundle, and the parity check keeps the two copies identical. It drives
+      `isPeakHour` and `peakPhaseAt` on the host side plus `isPeakHourUTC`, `nextPhase` and `buildLocalSlots` in the card,
+      so the tier, the countdown and the window table agree: a holiday collapses to one off-peak row and the panel notes
+      the rule.
+    - Make-up workdays on borrowed weekends stay off-peak, because the same footnote bills every weekend as off-peak.
+    - The table is maintained by hand: extend both copies every November, when the next year's notice is published
+      (`docs/PORTING.md` carries the runbook step). 2026 is the only year the peak era can bill.
+- **Fixed the countdown before each Monday's first peak**:
+    - `peakPhaseAt` and `nextPhase` collected switch points from two days back, so Monday 00:00–01:00 UTC (08:00–09:00
+      Beijing) had no previous switch (Friday) and returned null; the card fell back to "off-peak / 00:00" with no
+      countdown every Monday morning.
+    - The collection window is now ±16 days, which also covers the long holiday breaks (Spring Festival ≈ 11 days,
+      National Day ≈ 8 days).
+- **Tests**: twelve holiday and countdown checks (90 passed).
+
 ## v. 2.1.0
 
 - **Session cost now includes subagent sessions**:

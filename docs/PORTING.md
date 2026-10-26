@@ -129,6 +129,13 @@ content.
   skipped until the next tick, and `external` subagents never enter `byId`. Experimental Auto review, title generation,
   context compaction and web-search wrappers never enter a session event stream, so they are documented as excluded — the
   account-level figure belongs to the platform or a usage plugin, not to this projection.
+- **Chinese statutory holidays are part of the peak rule.** The official pricing footnote bills weekends *and* Chinese
+  statutory holidays as off-peak all day, so `CN_HOLIDAY_RANGES` (Beijing dates) is duplicated in `lib/pricing.js` and
+  `lib/client.js` and applied by `isPeakHour` / `peakPhaseAt` / `isPeakHourUTC` / `nextPhase` / `buildLocalSlots`. Update
+  both copies every November from the State Council notice — the parity test plus the 33-day check catch a half-done
+  update. Do not model make-up workdays: they fall on weekends, which the same footnote bills as off-peak. The
+  switch-collection window is ±16 days because a holiday can push the next peak about a week out (and it used to start
+  two days back, which returned `null` before each Monday's first peak).
 
 ## 6. Where the checks live
 
