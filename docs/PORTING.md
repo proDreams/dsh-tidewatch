@@ -121,9 +121,14 @@ content.
 - **The sessions list publishes no `current`.** `useSessions` resolves to `ctx.sessions.list`, whose snapshot is
   `{ ids, byId, phase, projectionsBySession }`; selecting `s.current` is always `undefined`, so a strict ownership check
   silently discards every bridged value — which is what pinned the session cost to zero on dsh `0.2.0-rc.2`. Resolve the
-  owner from the row the main view retains (`retainedBy.mainView`, see `sessionListCurrentId`) and keep the check tolerant;
-  the probe clears the bridge on mount, so a session switch still cannot show a stale amount. Three regression checks in
-  the suite guard this.
+  owner from the row the main view retains (`retainedBy.mainView`, see `sessionListCurrentId`), reading `row.id` — shell
+  rows carry no `sessionId` field — and keep the check tolerant; the probe clears the bridge on mount, so a session switch
+  still cannot show a stale amount.
+- **Session cost is the task, not the account.** The client rolls up descendant sessions from the same snapshot
+  (`byId[id].parentId` → `costUsage`, merged per model by `mergeModelBuckets`): a child projection that is still loading is
+  skipped until the next tick, and `external` subagents never enter `byId`. Experimental Auto review, title generation,
+  context compaction and web-search wrappers never enter a session event stream, so they are documented as excluded — the
+  account-level figure belongs to the platform or a usage plugin, not to this projection.
 
 ## 6. Where the checks live
 

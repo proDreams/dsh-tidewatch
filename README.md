@@ -33,6 +33,7 @@ locale.
   - [Upgrade and uninstall](#upgrade-and-uninstall)
   - [Upgrading from the original 1.x](#upgrading-from-the-original-1x)
 - [Usage](#usage)
+  - [Scope](#scope)
 - [Peak windows](#peak-windows)
 - [Billing model](#billing-model)
 - [Interface language](#interface-language)
@@ -85,10 +86,10 @@ locale.
 dsh plugin --profile web add github:proDreams/dsh-tidewatch
 
 # Option 2: a pinned release tag (reproducible installs)
-dsh plugin --profile web add github:proDreams/dsh-tidewatch#v2.0.1
+dsh plugin --profile web add github:proDreams/dsh-tidewatch#v2.1.0
 
 # Option 3: the tarball attached to a GitHub Release (pinned and offline-friendly)
-dsh plugin --profile web add https://github.com/proDreams/dsh-tidewatch/releases/download/v2.0.1/dsh-tidewatch-2.0.1.tgz
+dsh plugin --profile web add https://github.com/proDreams/dsh-tidewatch/releases/download/v2.1.0/dsh-tidewatch-2.1.0.tgz
 
 # Local directory (development)
 dsh plugin --profile web add link:/path/to/dsh-tidewatch
@@ -137,6 +138,21 @@ Two earlier fixes are worth knowing about if you used the original plugin before
 - The currency switch applies immediately and persists; CNY shows 2 decimals, USD shows 4.
 - The expanded panel never exceeds the free space above the badge — its height budget is measured from the badge itself,
   so it does not cover the composer on a small screen.
+
+### Scope
+
+The card reports the model calls written into the session event stream, and it also rolls up the session's descendant
+(subagent) sessions, so a team run shows the cost of the whole task. The token totals and the per-model breakdown include
+them too; the subagent share is shown under the total as `incl. subagents N · $X`.
+
+<p align="center">
+  <img src="images/card-subagents.png" width="400" alt="Session cost including subagent sessions">
+</p>
+
+It does **not** include calls that never enter a session's event stream: experimental **Auto review** (the `Auto`
+permission preset reviews every supported tool call with the same model), session title generation, context compaction,
+web-search wrappers, and other chats. Those are billed to the account — see Platform → Usage (or a usage-tracking plugin)
+for the account-level figure.
 
 ## Peak windows
 
@@ -241,7 +257,7 @@ model-call usage blocks (assistant/chunk, assistant/message events)
 
 ```sh
 DSH_CHECKOUT=<harness source root> bash scripts/build.sh   # syntax check + zod junction
-node test/verify.mjs                                       # 73 checks: peak math, billing, i18n, time zones
+node test/verify.mjs                                       # 78 checks: peak math, billing, i18n, time zones
 ```
 
 The suite materializes the real client bundle against a stub React and a fake plugin context, so it exercises the

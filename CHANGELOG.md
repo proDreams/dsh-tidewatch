@@ -1,6 +1,27 @@
 > Fork history starts at 2.0.0. Versions 1.0.x–1.1.x belong to the original project:
 > [KhalilYamber/dsh-tidewatch](https://github.com/KhalilYamber/dsh-tidewatch).
 
+## v. 2.1.0
+
+- **Session cost now includes subagent sessions**:
+    - DSH runs every subagent in its own session, so one task is billed across several sessions while the `costUsage`
+      projection — and therefore the card — only saw the main one. The card now walks the sessions list from the current
+      session (`byId[id].parentId`) and adds the descendants' `costUsage` buckets, so the total, the token breakdown and
+      the per-model list describe the whole task.
+    - The subagent share is shown under the total (`incl. subagents N · $X`). `N` counts the descendants that actually
+      contributed, so the count and the amount always agree.
+    - A child projection that has not loaded yet is skipped silently and picked up on the next snapshot tick, a malformed
+      `parentId` chain cannot loop, and the rollup stays off when the shell cannot name the current session.
+    - Shell-synthesized `external` subagents never enter the list, so their cost is not rolled up.
+- **Fixed the bridge-owner lookup**:
+    - `sessionListCurrentId` read `row.sessionId`, but shell rows are identified by `row.id`; the lookup therefore always
+      returned `undefined`, and only the tolerant fallback kept the cost visible. It now reads the real field (`id`, with
+      `sessionId` as a compatibility fallback), so the ownership check does its job and the rollup has an id to walk.
+- **Documented the reporting scope**: the card covers session model calls (now including subagents) and excludes
+  experimental Auto review, title generation, compaction, web-search wrappers and other chats — those never enter a
+  session event stream and belong to the account-level usage.
+- **Tests**: five rollup checks plus the real row shape for the ownership lookup (78 passed).
+
 ## v. 2.0.1
 
 - **Fixed the session cost on dsh 0.2.0-rc.2**:
