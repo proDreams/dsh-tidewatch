@@ -1,7 +1,7 @@
 > Fork history starts at 2.0.0. Versions 1.0.x–1.1.x belong to the original project:
 > [KhalilYamber/dsh-tidewatch](https://github.com/KhalilYamber/dsh-tidewatch).
 
-## Unreleased
+## v. 2.2.0
 
 - **Stable anchor for sibling plugins**:
     - The collapsed chip now carries `data-dsh-tide-anchor`. A plugin that wants to stack above it (for example

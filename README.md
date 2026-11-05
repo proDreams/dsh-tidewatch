@@ -86,10 +86,10 @@ locale.
 dsh plugin --profile web add github:proDreams/dsh-tidewatch
 
 # Option 2: a pinned release tag (reproducible installs)
-dsh plugin --profile web add github:proDreams/dsh-tidewatch#v2.1.1
+dsh plugin --profile web add github:proDreams/dsh-tidewatch#v2.2.0
 
 # Option 3: the tarball attached to a GitHub Release (pinned and offline-friendly)
-dsh plugin --profile web add https://github.com/proDreams/dsh-tidewatch/releases/download/v2.1.1/dsh-tidewatch-2.1.1.tgz
+dsh plugin --profile web add https://github.com/proDreams/dsh-tidewatch/releases/download/v2.2.0/dsh-tidewatch-2.2.0.tgz
 
 # Local directory (development)
 dsh plugin --profile web add link:/path/to/dsh-tidewatch

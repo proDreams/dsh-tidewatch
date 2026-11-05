@@ -85,10 +85,10 @@
 dsh plugin --profile web add github:proDreams/dsh-tidewatch
 
 # Вариант 2: закреплённый тег релиза (воспроизводимая установка)
-dsh plugin --profile web add github:proDreams/dsh-tidewatch#v2.1.1
+dsh plugin --profile web add github:proDreams/dsh-tidewatch#v2.2.0
 
 # Вариант 3: тарбол из GitHub-релиза (закреплённый и удобный для офлайна)
-dsh plugin --profile web add https://github.com/proDreams/dsh-tidewatch/releases/download/v2.1.1/dsh-tidewatch-2.1.1.tgz
+dsh plugin --profile web add https://github.com/proDreams/dsh-tidewatch/releases/download/v2.2.0/dsh-tidewatch-2.2.0.tgz
 
 # Локальная директория (для разработки)
 dsh plugin --profile web add link:/path/to/dsh-tidewatch
