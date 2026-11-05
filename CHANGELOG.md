@@ -1,6 +1,15 @@
 > Fork history starts at 2.0.0. Versions 1.0.x–1.1.x belong to the original project:
 > [KhalilYamber/dsh-tidewatch](https://github.com/KhalilYamber/dsh-tidewatch).
 
+## Unreleased
+
+- **Stable anchor for sibling plugins**:
+    - The collapsed chip now carries `data-dsh-tide-anchor`. A plugin that wants to stack above it (for example
+      `dsh-recall`'s strip) can read that attribute instead of scraping the `.tw-chip` class name, so renaming a styling
+      class cannot silently break the pairing.
+    - Additive and backward compatible: the markup, the class name and the rendered output are unchanged; the attribute
+      only adds a documented contract for other packages.
+
 ## v. 2.1.1
 
 - **Chinese statutory holidays now bill as off-peak**:
